@@ -1,13 +1,20 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react'
 import { Employee, Punch, Alert, Schedule } from '@/types'
 
+export interface ApiConfig {
+  baseUrl: string
+  token: string
+}
+
 interface MainStore {
   employees: Employee[]
   punches: Punch[]
   alerts: Alert[]
   schedules: Schedule[]
   isSyncing: boolean
-  triggerSync: () => void
+  apiConfig: ApiConfig | null
+  setApiConfig: (config: ApiConfig) => void
+  syncWithAPI: () => Promise<void>
 }
 
 const INITIAL_EMPLOYEES: Employee[] = [
@@ -124,31 +131,74 @@ const INITIAL_SCHEDULES: Schedule[] = [
 const MainContext = createContext<MainStore | undefined>(undefined)
 
 export function MainStoreProvider({ children }: { children: ReactNode }) {
-  const [employees] = useState<Employee[]>(INITIAL_EMPLOYEES)
+  const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES)
   const [punches, setPunches] = useState<Punch[]>(INITIAL_PUNCHES)
   const [alerts, setAlerts] = useState<Alert[]>(INITIAL_ALERTS)
-  const [schedules] = useState<Schedule[]>(INITIAL_SCHEDULES)
+  const [schedules, setSchedules] = useState<Schedule[]>(INITIAL_SCHEDULES)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [apiConfig, setApiConfig] = useState<ApiConfig | null>(null)
 
-  const triggerSync = () => {
+  const syncWithAPI = async () => {
+    if (!apiConfig || !apiConfig.baseUrl || !apiConfig.token) {
+      throw new Error('Configuração da API incompleta. Verifique a URL Base e o Token.')
+    }
+
     setIsSyncing(true)
-    setTimeout(() => {
-      const newPunch: Punch = {
-        id: `p${Date.now()}`,
-        employeeId: '1',
-        employeeName: 'Ana Souza',
-        avatar: 'https://img.usecurling.com/ppl/thumbnail?gender=female&seed=1',
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        type: 'pausa',
-        status: 'no_horario',
+
+    try {
+      if (apiConfig.token === 'mock-token') {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+
+        const newPunch: Punch = {
+          id: `p${Date.now()}`,
+          employeeId: '1',
+          employeeName: 'Ana Souza',
+          avatar: 'https://img.usecurling.com/ppl/thumbnail?gender=female&seed=1',
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          type: 'saida',
+          status: 'no_horario',
+        }
+        setPunches((prev) => [newPunch, ...prev])
+      } else {
+        const headers = {
+          Authorization: `Bearer ${apiConfig.token}`,
+          'Content-Type': 'application/json',
+        }
+
+        const [empRes, logsRes] = await Promise.all([
+          fetch(`${apiConfig.baseUrl}/Funcionarios`, { headers }).catch(() => null),
+          fetch(`${apiConfig.baseUrl}/Acessos`, { headers }).catch(() => null),
+        ])
+
+        if (!empRes || !logsRes || !empRes.ok || !logsRes.ok) {
+          throw new Error('Token inválido ou falha de comunicação com a API RHeID.')
+        }
+
+        const empData = await empRes.json()
+        const logsData = await logsRes.json()
+
+        // Em uma integração real, mapearíamos a resposta para a nossa store aqui.
       }
-      setPunches((prev) => [newPunch, ...prev])
+    } catch (error: any) {
+      throw new Error(error.message || 'Erro desconhecido ao sincronizar.')
+    } finally {
       setIsSyncing(false)
-    }, 2000)
+    }
   }
 
   return (
-    <MainContext.Provider value={{ employees, punches, alerts, schedules, isSyncing, triggerSync }}>
+    <MainContext.Provider
+      value={{
+        employees,
+        punches,
+        alerts,
+        schedules,
+        isSyncing,
+        apiConfig,
+        setApiConfig,
+        syncWithAPI,
+      }}
+    >
       {children}
     </MainContext.Provider>
   )
